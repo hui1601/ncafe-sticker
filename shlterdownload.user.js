@@ -3,6 +3,7 @@
 // @match       https://shelter.id/*
 // @grant       none
 // @version     1.0
+// @require     https://cdn.jsdelivr.net/npm/@violentmonkey/url
 // @author      웡웡이
 // ==/UserScript==
 function sleep(ms) {
@@ -77,7 +78,7 @@ async function getImage(url) {
 };
 
 
-window.navigation.addEventListener("navigate", async () => {
+VM.onNavigate(async () => {
   await sleep(500);
   let check = location.pathname.split('modal:_');
   if(document.getElementById('ncafedownbtn')) {
