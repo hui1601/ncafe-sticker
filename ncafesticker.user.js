@@ -4,13 +4,11 @@
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @run-at      document-idle
-// @require     https://cdn.jsdelivr.net/npm/@violentmonkey/url
 // @version     1.0
 // @author      웡웡이
 // ==/UserScript==
 
 const config = {};
-
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -82,12 +80,18 @@ async function addSticker() {
           throw '파일이 스티커 형식이 아닌 것 같습니다';
         }
         const stickers = await GM.getValue('sticker', []);
+        const idConflict = stickers.filter(function(e){return content.info.id == e.info.id;});
+        if(idConflict.length) {
+           if(!confirm(`${content.info.name}(${content.info.id})은(는) 이미 ${idConflict.map((e)=>e.info.name + "(" + e.info.id + ")").join(', ')}(으)로 추가되어있습니다.\n계속하시겠습니까?`)) {
+             return;
+           }
+        }
         stickers.push(content);
         await GM.setValue('sticker', stickers);
         await showStickers();
-        await showStickers();
       } catch(e){
-        alert('올바른 형식이 아닙니다!', e);
+        console.error(e);
+        alert('올바른 형식이 아닙니다!');
       }
     }
   }
@@ -98,6 +102,7 @@ function updateStickerBar(){
   const stickers = Array.from(document.querySelector('.se2_line_sticker_set').childNodes);
   let notElement = 0;
   for(const [index, sticker] of stickers.entries()) {
+    // ignore text element
     if(!(sticker instanceof Element)) {
       notElement ++;
       continue;
@@ -149,22 +154,28 @@ function updatePageButton() {
   }
 }
 
-async function showStickers(){
+async function showStickers(stickerButton){
   if(document.querySelector('._btn_shop')){
-    // hide Line sticker layout
     document.querySelector('.button_sticker').click();
-    await sleep(100);
+    while(document.querySelector('._btn_shop')) await sleep(10);
   }
-  if(document.getElementById('stickerbox')) {
-    document.querySelector('.attach_box').removeChild(document.getElementById('stickerbox'));
-    return;
+  const existingStickerLayer = document.querySelector('.custom_sticker_layer');
+  if(existingStickerLayer) {
+    const parent = existingStickerLayer.parentElement;
+    parent.removeChild(existingStickerLayer);
+    if(!stickerButton || parent === stickerButton.parentElement){
+      return;
+    }
+  }
+  if(!stickerButton) {
+    console.warn('cannot show custom stickers when stickerButton is not defined');
   }
   const l1 = document.createElement('div');
   const l2 = document.createElement('div');
   const l3 = document.createElement('div');
   const stickerBox = document.createElement('div');
   l1.id = 'stickerbox';
-  l1.className = 'CommentLineSticker';
+  l1.className = 'CommentLineSticker custom_sticker_layer';
   l2.className = 'se2_line_layer';
   l3.className = 'se2_in_layer';
   stickerBox.className = 'se2_line_sticker';
@@ -183,9 +194,10 @@ async function showStickers(){
   l3.appendChild(stickerBox);
   l2.appendChild(l3);
   l1.appendChild(l2);
-  document.querySelector('.attach_box').appendChild(l1);
+  stickerButton.parentElement.appendChild(l1);
+
+  // create sticker button and content
   const stickerSetElement = document.querySelector('.se2_line_sticker_set');
-  const stickerElements = [];
   const stickers = await GM.getValue('sticker', []);
   for(let sticker of stickers) {
     const stickerElement = document.createElement('li');
@@ -211,12 +223,17 @@ async function showStickers(){
       li.addEventListener('mouseout', function(){this.style.background="unset";});
       li.addEventListener('click', function(){
         const dataTransfer = new DataTransfer();
-        const attachElement = document.getElementById('attach2');
+        let attachElement = this;
+        for(let i = 0; i < 11; i++) {
+          attachElement = attachElement.parentElement;
+        }
+        attachElement = attachElement.querySelector('input.blind')
         attachElement.dispatchEvent(new Event('click'));
         attachElement.files = dataTransfer.files;
         dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
         attachElement.files = dataTransfer.files;
         attachElement.dispatchEvent(new Event('change'));
+        // hide stickers
         showStickers();
       });
       stickerListUlElement.appendChild(li);
@@ -228,18 +245,20 @@ async function showStickers(){
     stickerElement.appendChild(stickerListElement);
 
     stickerSetElement.appendChild(stickerElement);
-    stickerElements.push(stickerElement);
   }
-  const addStickerBtn = document.createElement('li');
-  addStickerBtn.innerHTML = `<button type="button" id="addsticker">
+
+  // add custom sticker import button
+  const addStickerItem = document.createElement('li');
+  const addStickerButton = document.createElement('button');
+  addStickerButton.type = 'button';
+  addStickerButton.innerHTML = `
   <svg xmlns="http://www.w3.org/2000/svg" width="26px" height="26px" viewBox="0 0 24 24" fill="none">
 <path d="M20 14V7C20 5.34315 18.6569 4 17 4H12M20 14L13.5 20M20 14H15.5C14.3954 14 13.5 14.8954 13.5 16V20M13.5 20H7C5.34315 20 4 18.6569 4 17V12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M7 4V7M7 10V7M7 7H4M7 7H10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-</button>`;
-  stickerSetElement.appendChild(addStickerBtn);
-  document.getElementById('addsticker').addEventListener('click', addSticker);
-  stickerElements.push(addStickerBtn);
+</svg>`;
+  addStickerItem.appendChild(addStickerButton)
+  stickerSetElement.appendChild(addStickerItem);
+  addStickerButton.addEventListener('click', addSticker);
   if(!config.page) {
     config.page = 0;
   }
@@ -254,29 +273,24 @@ async function showStickers(){
     updatePageButton();
     updateStickerBar();
   });
-  stickerElements[0].childNodes[0].click();
+  stickerSetElement.querySelector(':first-child > button').click();
   updatePageButton();
 }
 
-const handleNavigate = async () => {
-  if(!/^\/ca-fe\/cafes\/\d+\/articles\/\d+$/.test(window.location.pathname)){
+const injectCommentAttachBox = async (attachBox) => {
+  if(!attachBox){
+    console.warn(`Cannot inject into commnet element(attachBox is ${attachBox})`);
     return;
   }
-  if(!document.querySelector('.attach_box')) {
-    while(!document.querySelector('.attach_box')) {
-      await sleep(1000);
+  attachBox.querySelector('.button_sticker').addEventListener('click', function(){
+    const stickerLayer = this.parentElement.querySelector('.custom_sticker_layer');
+    if(stickerLayer){
+      this.parentElement.removeChild(stickerLayer);
     }
-  }
-  // race condition
-  if(document.getElementById('shelterstickerbtn')) {
-    return;
-  }
-  document.querySelector('.button_sticker').addEventListener('click', ()=>document.getElementById('stickerbox')&&document.querySelector('.attach_box').removeChild(document.getElementById('stickerbox')));
-  const attachBox = document.querySelector('.attach_box');
+  });
   const btn = document.createElement('a');
   btn.style['margin-left'] = '16px';
-  btn.id = 'shelterstickerbtn';
-  btn.className = 'button_sticker';
+  btn.className = 'button_sticker custom_sticker_button';
   btn.setAttribute('role', 'button');
   btn.setAttribute('href', '#');
   btn.innerHTML = `
@@ -286,8 +300,26 @@ const handleNavigate = async () => {
   <ellipse cx="9" cy="10.5" rx="1" ry="1.5" fill="currentColor"/>
   <path d="M15 22H12C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C21.5093 4.43821 21.8356 5.80655 21.9449 8M15 22C18.866 22 22 18.866 22 15M15 22C15 20.1387 15 19.2081 15.2447 18.4549C15.7393 16.9327 16.9327 15.7393 18.4549 15.2447C19.2081 15 20.1387 15 22 15M22 12V15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
   </svg>`;
-  btn.addEventListener('click', e=>(showStickers(),e.preventDefault()));
+  btn.addEventListener('click', function(e){
+    showStickers(this);
+    e.preventDefault();
+  });
   attachBox.appendChild(btn);
 };
 
-VM.onNavigate(handleNavigate);
+// TODO: 네이밍 귀찮
+new MutationObserver((a,b)=>{
+  a.map(e=>{
+    if(e.addedNodes.length) {
+      Array.from(e.addedNodes).map((e)=>{
+        if(e.classList){
+          let classes = Array.from(e.classList);
+          console.debug(classes, e);
+          if(classes.includes('CommentItem') || classes.includes('article_wrap')){
+            injectCommentAttachBox(e.querySelector('.CommentWriter .attach_box'));
+          }
+        }
+      });
+    }
+  });
+}).observe(document, {subtree: true, childList: true});
