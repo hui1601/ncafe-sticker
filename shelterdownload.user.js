@@ -2,7 +2,7 @@
 // @name        Shlter sticker downloder
 // @match       https://shelter.id/*
 // @grant       none
-// @version     1.0
+// @version     1.1
 // @require     https://cdn.jsdelivr.net/npm/@violentmonkey/url
 // @author      웡웡이
 // ==/UserScript==
