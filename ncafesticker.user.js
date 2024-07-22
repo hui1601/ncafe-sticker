@@ -4,7 +4,7 @@
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @run-at      document-idle
-// @version     1.0
+// @version     1.1
 // @author      웡웡이
 // ==/UserScript==
 
