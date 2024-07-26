@@ -317,7 +317,6 @@ const seOneInjection = {
   },
   injectToolbar: async function(toolbar){
     const customStickerTool = document.createElement('li');
-    const quotationTool = toolbar.querySelector('.se-toolbar-item-insert-quotation');
     customStickerTool.className = 'se-toolbar-item se-toolbar-item-sticker';
     customStickerTool.innerHTML = `
 <button type="button" class="se-sticker-toolbar-button se-document-toolbar-toggle-button se-text-icon-toolbar-button">
@@ -336,7 +335,7 @@ const seOneInjection = {
     customStickerTool.querySelector('button').addEventListener('mouseover', function(){this.querySelector('.svg-icon').style.color='#03c75a';});
     customStickerTool.querySelector('button').addEventListener('mouseout', function(){this.querySelector('.svg-icon').style.color='unset';});
     customStickerTool.querySelector('button').addEventListener('click', seOneInjection.showStickers);
-    toolbar.insertBefore(customStickerTool, quotationTool);
+    toolbar.appendChild(customStickerTool);
   },
   updatePageButton: function(element) {
     const itemsElement = element.querySelector('.se-panel-tab-list');
