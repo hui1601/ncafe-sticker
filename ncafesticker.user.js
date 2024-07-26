@@ -3,8 +3,8 @@
 // @match       *://cafe.naver.com/*
 // @grant       GM.getValue
 // @grant       GM.setValue
-// @run-at      document-idle
-// @version     1.3
+// @run-at      document-body
+// @version     1.4
 // @author      웡웡이
 // ==/UserScript==
 
@@ -123,7 +123,7 @@ const commentInjection = {
   },
   updatePageButton: function() {
     let elementCount = 0;
-    for(const [index, sticker] of Array.from(document.querySelector('.se2_line_sticker_set').childNodes).entries()) {
+    for(const sticker of Array.from(document.querySelector('.se2_line_sticker_set').childNodes)) {
       if(sticker instanceof Element) {
         elementCount++;
       }
@@ -133,7 +133,7 @@ const commentInjection = {
       commentInjection.config.page = 0;
     }
     if(commentInjection.config.page > maxPage) {
-       commentInjection.config.page = maxPage;
+      commentInjection.config.page = maxPage;
     }
     let next = document.querySelector('.se2_next');
     // when next button is enabled
@@ -173,7 +173,10 @@ const commentInjection = {
     }
     if(!stickerButton) {
       console.warn('cannot show custom stickers when stickerButton is not defined');
+      console.trace();
+      return;
     }
+    commentInjection.config.page = 0;
     const l1 = document.createElement('div');
     const l2 = document.createElement('div');
     const l3 = document.createElement('div');
@@ -205,12 +208,12 @@ const commentInjection = {
     const stickers = await GM.getValue('sticker', []);
     for(let sticker of stickers) {
       const stickerElement = document.createElement('li');
-      const stickerBtn = document.createElement('button');
+      const stickerButton = document.createElement('button');
       const stickerListElement = document.createElement('div');
       const stickerListUlElement = document.createElement('ul');
-      stickerBtn.type = 'button';
-      stickerBtn.innerHTML = `<img src="${sticker.info.thumbnail}" height="26px"/>`;
-      stickerBtn.addEventListener('click', function(e) {
+      stickerButton.type = 'button';
+      stickerButton.innerHTML = `<img src="${sticker.info.thumbnail}" height="26px"/>`;
+      stickerButton.addEventListener('click', function(e) {
         Array.from(this.parentElement.parentElement.childNodes).map(e=>{
           if(e instanceof Element) {
             e.className="";
@@ -227,11 +230,7 @@ const commentInjection = {
         li.addEventListener('mouseout', function(){this.style.background="unset";});
         li.addEventListener('click', function(){
           const dataTransfer = new DataTransfer();
-          let attachElement = this;
-          for(let i = 0; i < 11; i++) {
-            attachElement = attachElement.parentElement;
-          }
-          attachElement = attachElement.querySelector('input.blind')
+          let attachElement = this.closest('div.attach_box').querySelector('input.blind');
           attachElement.dispatchEvent(new Event('click'));
           attachElement.files = dataTransfer.files;
           dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
@@ -243,7 +242,7 @@ const commentInjection = {
         stickerListUlElement.appendChild(li);
       }
 
-      stickerElement.appendChild(stickerBtn);
+      stickerElement.appendChild(stickerButton);
 
       stickerListElement.appendChild(stickerListUlElement);
       stickerElement.appendChild(stickerListElement);
@@ -291,28 +290,31 @@ const commentInjection = {
         this.parentElement.removeChild(stickerLayer);
       }
     });
-    const btn = document.createElement('a');
-    btn.style['margin-left'] = '16px';
-    btn.className = 'button_sticker custom_sticker_button';
-    btn.setAttribute('role', 'button');
-    btn.setAttribute('href', '#');
-    btn.innerHTML = `
+    const button = document.createElement('a');
+    button.style['margin-left'] = '16px';
+    button.className = 'button_sticker custom_sticker_button';
+    button.setAttribute('role', 'button');
+    button.setAttribute('href', '#');
+    button.innerHTML = `
     <svg xmlns="http://www.w3.org/22000/svg" height="17px" viewBox="0 0 24 24" fill="none">
     <path d="M9 16C9.85038 16.6303 10.8846 17 12 17C13.1154 17 14.1496 16.6303 15 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
     <ellipse cx="15" cy="10.5" rx="1" ry="1.5" fill="currentColor"/>
     <ellipse cx="9" cy="10.5" rx="1" ry="1.5" fill="currentColor"/>
     <path d="M15 22H12C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C21.5093 4.43821 21.8356 5.80655 21.9449 8M15 22C18.866 22 22 18.866 22 15M15 22C15 20.1387 15 19.2081 15.2447 18.4549C15.7393 16.9327 16.9327 15.7393 18.4549 15.2447C19.2081 15 20.1387 15 22 15M22 12V15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
     </svg>`;
-    btn.addEventListener('click', function(e){
+    button.addEventListener('click', function(e){
       commentInjection.showStickers(this);
       e.preventDefault();
     });
-    attachBox.appendChild(btn);
+    attachBox.appendChild(button);
   },
 };
 
 
 const seOneInjection = {
+  config: {
+    page: 0,
+  },
   injectToolbar: async function(toolbar){
     const customStickerTool = document.createElement('li');
     const quotationTool = toolbar.querySelector('.se-toolbar-item-insert-quotation');
@@ -327,8 +329,8 @@ const seOneInjection = {
       <path d="M15 22H12C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C21.5093 4.43821 21.8356 5.80655 21.9449 8M15 22C18.866 22 22 18.866 22 15M15 22C15 20.1387 15 19.2081 15.2447 18.4549C15.7393 16.9327 16.9327 15.7393 18.4549 15.2447C19.2081 15 20.1387 15 22 15M22 12V15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
       </svg>
   </span>
-  <span class="se-toolbar-label" aria-hidden="true">웡스티커</span>
-  <span class="se-toolbar-tooltip">웡스티커 추가</span>
+  <span class="se-toolbar-label" aria-hidden="true">커스텀 스티커</span>
+  <span class="se-toolbar-tooltip">커스텀 스티커 추가</span>
 </button>
 `;
     customStickerTool.querySelector('button').addEventListener('mouseover', function(){this.querySelector('.svg-icon').style.color='#03c75a';});
@@ -336,7 +338,59 @@ const seOneInjection = {
     customStickerTool.querySelector('button').addEventListener('click', seOneInjection.showStickers);
     toolbar.insertBefore(customStickerTool, quotationTool);
   },
-  showStickers: async function(){
+  updatePageButton: function(element) {
+    const itemsElement = element.querySelector('.se-panel-tab-list');
+    const computedStyle = window.getComputedStyle(itemsElement);
+    const padding = parseInt(computedStyle.getPropertyValue('padding-left'), 10) + parseInt(computedStyle.getPropertyValue('padding-right'), 10);
+    const displayWidth = itemsElement.clientWidth - padding;
+    const maxWidth = itemsElement.scrollWidth - padding;
+    const maxPage = Math.floor(maxWidth / displayWidth);
+    if(seOneInjection.config.page < 0) {
+      seOneInjection.config.page = 0;
+    }
+    if(seOneInjection.config.page > maxPage) {
+      seOneInjection.config.page = maxPage;
+    }
+    const prevButton = element.querySelector('.se-panel-tab-prev-button');
+    const nextButton = element.querySelector('.se-panel-tab-next-button');
+    if(seOneInjection.config.page == maxPage) {
+      nextButton.disabled = 'disabled';
+    }
+    else {
+      nextButton.disabled = null;
+    }
+    if(seOneInjection.config.page == 0) {
+      prevButton.disabled = 'disabled';
+    }
+    else {
+      prevButton.disabled = null;
+    }
+  },
+  nextButtonHandler: function() {
+    const element = this.parentElement.querySelector('.se-panel-tab-list');
+    const computedStyle = window.getComputedStyle(element);
+    const padding = parseInt(computedStyle.getPropertyValue('padding-left'), 10) + parseInt(computedStyle.getPropertyValue('padding-right'), 10);
+    const displayWidth = element.clientWidth - padding;
+    const maxWidth = element.scrollWidth - padding;
+    seOneInjection.config.page++;
+    seOneInjection.updatePageButton(this.parentElement);
+    let transform = displayWidth * seOneInjection.config.page;
+    if(transform > maxWidth) {
+      transform = transform - displayWidth;
+    }
+    element.style.transform = `translateX(-${transform}px)`;
+  },
+  prevButtonHandler: function() {
+    const element = this.parentElement.querySelector('.se-panel-tab-list');
+    const computedStyle = window.getComputedStyle(element);
+    const padding = parseInt(computedStyle.getPropertyValue('padding-left'), 10) + parseInt(computedStyle.getPropertyValue('padding-right'), 10);
+    const displayWidth = element.clientWidth - padding;
+    seOneInjection.config.page--;
+    seOneInjection.updatePageButton(this.parentElement);
+    let transform = displayWidth * seOneInjection.config.page;
+    element.style.transform = `translateX(-${transform}px)`;
+  },
+  showStickers: async function() {
     let editorTop = this.closest('div.se-dnd-wrap');
     let stickerLayer = editorTop.querySelector('.se-popup.__se-sentry');
     if(stickerLayer) {
@@ -354,9 +408,9 @@ const seOneInjection = {
     <div class="se-popup-dim se-popup-dim-transparent"></div>
     <div class="se-popup-container">
         <div class="se-popup-content">
-            <div class="se-panel-header se-popup-panel-header"><strong class="se-panel-title">웡!</strong></div>
+            <div class="se-panel-header se-popup-panel-header"><strong class="se-panel-title">개쩌는 스티커!</strong></div>
             <div class="se-panel-tab se-panel-tab-sticker se-popup-panel-tab-sticker">
-                <button type="button" class="se-panel-tab-prev-button" disabled=""><span class="se-blind">이전</span></button>
+                <button type="button" class="se-panel-tab-prev-button"><span class="se-blind">이전</span></button>
                 <button type="button" class="se-panel-tab-next-button"><span class="se-blind">다음</span></button>
                 <ul class="se-panel-tab-list" style="transform: translateX(0px);">
                 </ul>
@@ -369,6 +423,8 @@ const seOneInjection = {
       <button type="button" class="se-popup-close-button"><span class="se-blind">팝업 닫기</span></button>
     </div>
 `;
+    popup.querySelector('.se-panel-tab-prev-button').addEventListener('click', seOneInjection.prevButtonHandler);
+    popup.querySelector('.se-panel-tab-next-button').addEventListener('click', seOneInjection.nextButtonHandler);
     const stickerIconItems = popup.querySelector('.se-panel-tab-list');
     const stickerItems = popup.querySelector('.se-sidebar-inner-scroll');
     const stickers = await GM.getValue('sticker', []);
@@ -406,10 +462,12 @@ const seOneInjection = {
           const dataTransfer = new DataTransfer();
           const pasteElement = document.querySelector('div[allow="clipboard-read"]');
           dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
-          pasteElement.dispatchEvent(new ClipboardEvent('paste', {
+          console.log(dataTransfer);
+          let event = new CustomEvent('paste', {
             bubbles: true,
-            clipboardData: dataTransfer,
-          }));
+          });
+          event.clipboardData = dataTransfer;
+          pasteElement.dispatchEvent(event);
           // hide stickers
           this.closest('div.se-popup-container').querySelector('button.se-popup-close-button').click();
         });
@@ -451,17 +509,22 @@ new MutationObserver((a,b)=>{
     if(e.addedNodes.length) {
       Array.from(e.addedNodes).map((e)=>{
         if(e.classList){
+          console.log(e);
           let classes = Array.from(e.classList);
           if(classes.includes('CommentItem') || classes.includes('article_wrap')){
             commentInjection.injectAttachBox(e.querySelector('.CommentWriter .attach_box'));
           }
           if(classes.includes('se-body')) {
-            console.debug(classes, e);
-            console.debug(e.querySelector('.se-toolbar-item-sticker'));
             seOneInjection.injectToolbar(e.querySelector('.se-toolbar'));
           }
         }
       });
     }
   });
-}).observe(document, {subtree: true, childList: true});
+}).observe(document.body, {subtree: true, childList: true});
+
+// when page is already loaded
+const warp = document.querySelector('.article_wrap');
+if(warp) {
+  commentInjection.injectAttachBox(warp.querySelector('.CommentWriter .attach_box'));
+}
