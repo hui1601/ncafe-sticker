@@ -4,7 +4,7 @@
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @run-at      document-body
-// @version     1.5
+// @version     1.6
 // @author      웡웡이
 // ==/UserScript==
 
@@ -68,44 +68,145 @@ function dataurlToFile(url, filename) {
   return new File([content], filename, { type: detectMime(content) });
 }
 
+function isValidImage(url) {
+  try {
+    let urlObj = new URL(url);
+    if (urlObj.protocol !== 'data:') {
+      return false;
+    }
+    let path = urlObj.pathname;
+    if (/^image\/\w*;base64,[\w\/-=]*$/.test(path)) {
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
+}
+
+function checkObjectType(obj, types) {
+  try {
+    let count = 0;
+    const keys = Object.keys(obj);
+    for (const val of types) {
+      if (!keys.includes(val.key)) {
+        console.log(`키 값 없음: ${val.key}`);
+        return false;
+      }
+      if (val.type === 'image') {
+        if (typeof obj[val.key] !== 'string' && !isValidImage(obj[val.key])) {
+          console.log(`이미지 타입 확인 실패: ${val.key}(${obj[val.key]})`);
+          return false;
+        }
+        count++;
+        continue;
+      }
+      if (val.type === 'array') {
+        if (typeof obj[val.key] !== 'object' && !Array.isArray(obj[val.key])) {
+          console.log(`배열 타입 확인 실패: ${val.key}(${obj[val.key]})`);
+          return false;
+        }
+        if (val.data && !obj[val.key].every(function (e) { return checkObjectType(e, val.data) })) {
+          console.log(`배열 타입 확인 실패: ${val.key}(${obj[val.key]})`);
+          return false;
+        }
+        count++;
+        continue;
+      }
+      if (typeof obj[val.key] !== val.type) {
+        console.log(`타입 확인 실패: ${val.key}(${obj[val.key]})`);
+        return false;
+      }
+      if (val.type === 'number' && (isNaN(obj[val.key]) || !isFinite(obj[val.key]))) {
+        console.log(`숫자 확인 실패: ${val.key}(${obj[val.key]})`);
+        return false;
+      }
+      if (val.type === 'object' && (obj[val.key] === null || (val.data && !checkObjectType(obj[val.key], val.data)))) {
+        console.log(`객체 확인 실패: ${val.key}(${obj[val.key]})`);
+        return false;
+      }
+      count++;
+    }
+    if (keys.length !== count) {
+      console.log(`갯수 실패: ${keys.length} !== ${count}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
+}
 
 async function addSticker(success) {
   let input = document.createElement('input');
   input.type = 'file';
   input.setAttribute('accept', 'application/json');
+  input.setAttribute('multiple', '');
   input.onchange = function (e) {
-    var file = e.target.files[0];
-    var reader = new FileReader();
-    reader.readAsText(file, 'UTF-8');
-    reader.onload = async function (e) {
-      try {
-        var content = JSON.parse(e.target.result);
-        if (!content || !content.info || typeof content.info !== 'object' || !content.stickers || !content.stickers.length) {
-          throw '파일이 스티커 형식이 아닌 것 같습니다';
-        }
-        const stickers = await GM.getValue('sticker', []);
-        const idConflict = stickers.filter(function (e) { return content.info.id == e.info.id; });
-        if (idConflict.length) {
-          if (!confirm(`${content.info.name}(${content.info.id})은(는) 이미 ${idConflict.map((e) => e.info.name + "(" + e.info.id + ")").join(', ')}(으)로 추가되어있습니다.\n덮어쓰겠습니까?`)) {
-            return;
+    Array.from(e.target.files).map((file) => {
+      let reader = new FileReader();
+      reader.readAsText(file, 'UTF-8');
+      reader.onload = async function (e) {
+        try {
+          let content = JSON.parse(e.target.result);
+          let assertStickerType = false;
+          if (!content) {
+            assertStickerType = true;
           }
-          for (let i = 0; i < stickers.length; i++) {
-            if (stickers[i].info.id == content.info.id) {
-              stickers[i] = content;
-              break;
+          else if (!content.info) {
+            assertStickerType = true;
+          }
+          else if (!content.stickers) {
+            assertStickerType = true;
+          }
+          else if (!checkObjectType(content, [
+            {
+              key: 'info', type: 'object', data: [
+                { key: 'id', type: 'number' },
+                { key: 'name', type: 'string' },
+                { key: 'description', type: 'string' },
+                { key: 'thumbnail', type: 'image' },
+              ]
+            },
+            {
+              key: 'stickers', type: 'array', data: [
+                { key: 'id', type: 'number' },
+                { key: 'image', type: 'string' },
+              ]
+            },
+          ])) {
+            throw '파일이 스티커 형식이 아닌 것 같습니다';
+          }
+          if (assertStickerType) {
+            throw '파일이 스티커 형식이 아닌 것 같습니다';
+          }
+          const stickers = await GM.getValue('sticker', []);
+
+          const idConflict = stickers.filter(function (e) { return content.info.id == e.info.id; });
+          if (idConflict.length) {
+            if (!confirm(`${content.info.name}(${content.info.id})은(는) 이미 ${idConflict.map((e) => e.info.name + "(" + e.info.id + ")").join(', ')}(으)로 추가되어있습니다.\n덮어쓰겠습니까?`)) {
+              return;
+            }
+            for (let i = 0; i < stickers.length; i++) {
+              if (stickers[i].info.id == content.info.id) {
+                stickers[i] = content;
+                break;
+              }
             }
           }
+          else {
+            stickers.push(content);
+          }
+          await GM.setValue('sticker', stickers);
+          success();
+        } catch (e) {
+          console.error(e);
+          alert('올바른 형식이 아닙니다!');
         }
-        else {
-          stickers.push(content);
-        }
-        await GM.setValue('sticker', stickers);
-        success();
-      } catch (e) {
-        console.error(e);
-        alert('올바른 형식이 아닙니다!');
       }
-    }
+    });
   }
   input.click();
 }
