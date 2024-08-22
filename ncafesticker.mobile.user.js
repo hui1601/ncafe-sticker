@@ -4,7 +4,7 @@
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @run-at      document-body
-// @version     1.6
+// @version     1.7
 // @author      웡웡이
 // ==/UserScript==
 
@@ -207,7 +207,7 @@ async function addSticker(success) {
           alert('올바른 형식이 아닙니다!');
         }
       }
-    }
+    });
   }
   input.click();
 }
