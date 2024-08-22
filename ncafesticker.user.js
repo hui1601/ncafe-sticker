@@ -4,7 +4,7 @@
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @run-at      document-body
-// @version     1.6
+// @version     1.7
 // @author      웡웡이
 // ==/UserScript==
 
@@ -341,7 +341,9 @@ const commentInjection = {
       for (let stickerItem of sticker.stickers) {
         let li = document.createElement('li');
         li.style.background = 'unset';
-        li.innerHTML = `<button type="button" style="background: unset;"><img height="100px"/></button>`;
+        li.innerHTML = `<button type="button" style="background: unset;"><img/></button>`;
+        li.querySelector('button img').style['max-width'] = '100px';
+        li.querySelector('button img').style['max-height'] = '100px';
         li.querySelector('button img').src = stickerItem.image;
         li.addEventListener('mouseover', function () { this.style.background = "#EEEEEE"; });
         li.addEventListener('mouseout', function () { this.style.background = "unset"; });
