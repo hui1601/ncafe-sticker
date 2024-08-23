@@ -4,7 +4,7 @@
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @run-at      document-body
-// @version     1.7
+// @version     1.8
 // @author      웡웡이
 // ==/UserScript==
 
@@ -25,6 +25,10 @@ clearStickerList = async (callback) => {
   }
   console.info(`사용자가 삭제를 취소함`);
 };
+
+async function getStickerList() {
+  return await GM.getValue('sticker', []);
+}
 
 function detectMime(arr) {
   const mimes = [
@@ -183,7 +187,7 @@ async function addSticker(success) {
           if (assertStickerType) {
             throw '파일이 스티커 형식이 아닌 것 같습니다';
           }
-          const stickers = await GM.getValue('sticker', []);
+          const stickers = await getStickerList();
 
           const idConflict = stickers.filter(function (e) { return content.info.id == e.info.id; });
           if (idConflict.length) {
@@ -287,7 +291,7 @@ const commentInjection = {
 
     // create sticker button and content
     const stickerSetElement = stickerBox.querySelector('.sticker_set');
-    const stickers = await GM.getValue('sticker', []);
+    const stickers = await getStickerList();
     for (let sticker of stickers) {
       const stickerElement = document.createElement('li');
       const stickerButton = document.createElement('button');
@@ -442,6 +446,37 @@ const seOneInjection = {
     customStickerTool.querySelector('button').addEventListener('click', seOneInjection.showStickers);
     toolbar.appendChild(customStickerTool);
   },
+  showSticker: async function (button) {
+    const id = parseInt(button.dataset['id'], 10);
+    const stickers = await getStickerList();
+    const sticker = stickers[id];
+    const stickerList = button.closest('.se-router-page-content').querySelector('.se-page-inner-scroll ul.se-page-list:nth-child(' + (id + 1) + ')');
+    if (stickerList.children.length) {
+      return;
+    }
+    for (const stickerItem of sticker.stickers) {
+      const stickerItemElement = document.createElement('li');
+      stickerItemElement.className = 'se-page-item';
+      stickerItemElement.innerHTML = `
+<button type="button" class="se-page-element se-page-element-sticker" draggable="false">
+  <img class="se-page-sticker"/>
+</button>`;
+      stickerItemElement.querySelector('.se-page-sticker').src = stickerItem.image;
+      stickerItemElement.querySelector('button').addEventListener('click', function () {
+        const dataTransfer = new DataTransfer();
+        const pasteElement = document.querySelector('div[allow="clipboard-read"]');
+        dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
+        let event = new CustomEvent('paste', {
+          bubbles: true,
+        });
+        event.clipboardData = dataTransfer;
+        pasteElement.dispatchEvent(event);
+        // hide stickers
+        this.closest('div.se-router-page-content').querySelector('.se-router-page-button-cancel').click();
+      });
+      stickerList.appendChild(stickerItemElement);
+    }
+  },
   showStickers: async function () {
     let editorTop = this.closest('div.se-dnd-wrap');
     const popup = document.createElement('div');
@@ -466,7 +501,7 @@ const seOneInjection = {
 `;
     const stickerIconItems = popup.querySelector('.se-sticker-tab');
     const stickerItems = popup.querySelector('.se-page-inner-scroll');
-    const stickers = await GM.getValue('sticker', []);
+    const stickers = await getStickerList();
     for (const [index, sticker] of stickers.entries()) {
       const iconItem = document.createElement('li');
       const iconItemButton = document.createElement('button');
@@ -483,36 +518,19 @@ const seOneInjection = {
           activedSticker.classList.remove('se-is-selected');
         }
         this.classList.add('se-is-selected');
+        seOneInjection.showSticker(this);
         this.closest('.se-router-page-content').querySelector(`div.se-page-inner-scroll ul.se-page-list:nth-child(${parseInt(this.dataset.id, 10) + 1})`).classList.add('se-is-on');
       });
-      iconItemButton.innerHTML = `<img height="37px"/>`;
+      iconItemButton.innerHTML = `<img/>`;
       iconItemButton.querySelector('img').src = sticker.info.thumbnail
+      iconItemButton.querySelector('img').style['max-width'] = '34px';
+      iconItemButton.querySelector('img').style['max-height'] = '34px';
+      iconItemButton.style['width'] = '39px';
+      iconItemButton.style['height'] = '39px';
       iconItem.appendChild(iconItemButton);
       stickerIconItems.appendChild(iconItem);
       const stickerList = document.createElement('ul');
       stickerList.className = 'se-page-list';
-      for (const stickerItem of sticker.stickers) {
-        const stickerItemElement = document.createElement('li');
-        stickerItemElement.className = 'se-page-item';
-        stickerItemElement.innerHTML = `
-<button type="button" class="se-page-element se-page-element-sticker" draggable="false">
-  <img class="se-page-sticker"/>
-</button>`;
-        stickerItemElement.querySelector('.se-page-sticker').src = stickerItem.image;
-        stickerItemElement.querySelector('button').addEventListener('click', function () {
-          const dataTransfer = new DataTransfer();
-          const pasteElement = document.querySelector('div[allow="clipboard-read"]');
-          dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
-          let event = new CustomEvent('paste', {
-            bubbles: true,
-          });
-          event.clipboardData = dataTransfer;
-          pasteElement.dispatchEvent(event);
-          // hide stickers
-          this.closest('div.se-router-page-content').querySelector('.se-router-page-button-cancel').click();
-        });
-        stickerList.appendChild(stickerItemElement);
-      }
       stickerItems.appendChild(stickerList);
     }
 
