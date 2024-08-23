@@ -4,7 +4,7 @@
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @run-at      document-body
-// @version     1.7
+// @version     1.8
 // @author      웡웡이
 // ==/UserScript==
 
@@ -25,6 +25,10 @@ clearStickerList = async (callback) => {
   }
   console.info(`사용자가 삭제를 취소함`);
 };
+
+async function getStickerList() {
+  return await GM.getValue('sticker', []);
+}
 
 function detectMime(arr) {
   const mimes = [
@@ -182,7 +186,7 @@ async function addSticker(success) {
           if (assertStickerType) {
             throw '파일이 스티커 형식이 아닌 것 같습니다';
           }
-          const stickers = await GM.getValue('sticker', []);
+          const stickers = await getStickerList();
 
           const idConflict = stickers.filter(function (e) { return content.info.id == e.info.id; });
           if (idConflict.length) {
@@ -273,6 +277,37 @@ const commentInjection = {
       prev.disabled = null;
     }
   },
+  showSticker: async function (stickerButton) {
+    let list = stickerButton.parentElement.querySelector('.se2_linesticker_list > ul');
+    if(list.childNodes.length) {
+      return;
+    }
+    list.innerHTML = '';
+    const stickers = (await getStickerList()).find(function (e) { return e.info.id == stickerButton.dataset['id']; });
+    for (let sticker of stickers.stickers) {
+      let li = document.createElement('li');
+      list.appendChild(li);
+      li.style.background = 'unset';
+      li.innerHTML = `<button type="button" style="background: unset;"><img/></button>`;
+      li.querySelector('button img').style['max-width'] = '100px';
+      li.querySelector('button img').style['max-height'] = '100px';
+      li.querySelector('button img').src = sticker.image;
+      li.addEventListener('mouseover', function () { this.style.background = "#EEEEEE"; });
+      li.addEventListener('mouseout', function () { this.style.background = "unset"; });
+      li.addEventListener('click', function () {
+        const dataTransfer = new DataTransfer();
+        let attachElement = this.closest('div.attach_box').querySelector('input.blind');
+        attachElement.dispatchEvent(new Event('click'));
+        attachElement.files = dataTransfer.files;
+        dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
+        attachElement.files = dataTransfer.files;
+        attachElement.dispatchEvent(new Event('change'));
+        // hide stickers
+        commentInjection.showStickers();
+      }
+      );
+    }
+  },
   showStickers: async function showStickers(stickerButton) {
     if (document.querySelector('._btn_shop')) {
       document.querySelector('.button_sticker').click();
@@ -320,7 +355,7 @@ const commentInjection = {
 
     // create sticker button and content
     const stickerSetElement = document.querySelector('.se2_line_sticker_set');
-    const stickers = await GM.getValue('sticker', []);
+    const stickers = await getStickerList();
     for (let sticker of stickers) {
       const stickerElement = document.createElement('li');
       const stickerButton = document.createElement('button');
@@ -329,6 +364,7 @@ const commentInjection = {
       stickerButton.type = 'button';
       stickerButton.innerHTML = `<img height="26px"/>`;
       stickerButton.querySelector('img').src = sticker.info.thumbnail;
+      stickerButton.dataset['id'] = sticker.info.id;
       stickerButton.addEventListener('click', function (e) {
         Array.from(this.parentElement.parentElement.childNodes).map(e => {
           if (e instanceof Element) {
@@ -336,30 +372,9 @@ const commentInjection = {
           }
         });
         this.parentElement.className = 'active';
+        commentInjection.showSticker(this);
       });
       stickerListElement.className = 'se2_linesticker_list';
-      for (let stickerItem of sticker.stickers) {
-        let li = document.createElement('li');
-        li.style.background = 'unset';
-        li.innerHTML = `<button type="button" style="background: unset;"><img/></button>`;
-        li.querySelector('button img').style['max-width'] = '100px';
-        li.querySelector('button img').style['max-height'] = '100px';
-        li.querySelector('button img').src = stickerItem.image;
-        li.addEventListener('mouseover', function () { this.style.background = "#EEEEEE"; });
-        li.addEventListener('mouseout', function () { this.style.background = "unset"; });
-        li.addEventListener('click', function () {
-          const dataTransfer = new DataTransfer();
-          let attachElement = this.closest('div.attach_box').querySelector('input.blind');
-          attachElement.dispatchEvent(new Event('click'));
-          attachElement.files = dataTransfer.files;
-          dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
-          attachElement.files = dataTransfer.files;
-          attachElement.dispatchEvent(new Event('change'));
-          // hide stickers
-          commentInjection.showStickers();
-        });
-        stickerListUlElement.appendChild(li);
-      }
 
       stickerElement.appendChild(stickerButton);
 
@@ -572,6 +587,39 @@ const seOneInjection = {
     let transform = displayWidth * seOneInjection.config.page;
     element.style.transform = `translateX(-${transform}px)`;
   },
+  showSticker: async function (stickerButton) {
+    // Caution: ID value is just an index of sticker list in SeOne
+    const stickerID = parseInt(stickerButton.dataset['id'], 10);
+    let list = stickerButton.closest('.se-popup-content')
+      .querySelector(`.se-panel-content-sticker .se-sidebar-inner-scroll > ul:nth-child(${stickerID + 1})`);
+    if (list.childNodes.length) {
+      return;
+    }
+    list.innerHTML = '';
+    const stickers = (await getStickerList())[stickerID];
+    for (let sticker of stickers.stickers) {
+      let li = document.createElement('li');
+      li.className = 'se-sidebar-item';
+      li.innerHTML = `
+<button type="button" class="se-sidebar-element se-sidebar-element-sticker" draggable="false">
+  <img class="se-sidebar-sticker"/>
+</button>`;
+      li.querySelector('button img').src = sticker.image;
+      li.querySelector('button').addEventListener('click', function () {
+        const dataTransfer = new DataTransfer();
+        const pasteElement = document.querySelector('div[allow="clipboard-read"]');
+        dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
+        let event = new CustomEvent('paste', {
+          bubbles: true,
+        });
+        event.clipboardData = dataTransfer;
+        pasteElement.dispatchEvent(event);
+        // hide stickers
+        this.closest('div.se-popup-container').querySelector('button.se-popup-close-button').click();
+      });
+      list.appendChild(li);
+    }
+  },
   showStickers: async function () {
     let editorTop = this.closest('div.se-dnd-wrap');
     let stickerLayer = editorTop.querySelector('.se-popup.__se-sentry');
@@ -609,7 +657,7 @@ const seOneInjection = {
     popup.querySelector('.se-panel-tab-next-button').addEventListener('click', seOneInjection.nextButtonHandler);
     const stickerIconItems = popup.querySelector('.se-panel-tab-list');
     const stickerItems = popup.querySelector('.se-sidebar-inner-scroll');
-    const stickers = await GM.getValue('sticker', []);
+    const stickers = await getStickerList();
     for (const [index, sticker] of stickers.entries()) {
       const iconItem = document.createElement('li');
       const iconItemButton = document.createElement('button');
@@ -627,6 +675,7 @@ const seOneInjection = {
         }
         this.classList.add('se-is-selected');
         this.closest('.se-popup-content').querySelector(`.se-sidebar-inner-scroll ul:nth-child(${parseInt(this.dataset.id, 10) + 1})`).classList.add('se-is-on');
+        seOneInjection.showSticker(this);
       });
       iconItemButton.innerHTML = `<img height="37px"/>`;
       iconItemButton.querySelector('img').src = sticker.info.thumbnail
@@ -634,28 +683,6 @@ const seOneInjection = {
       stickerIconItems.appendChild(iconItem);
       const stickerList = document.createElement('ul');
       stickerList.className = 'se-sidebar-list';
-      for (const stickerItem of sticker.stickers) {
-        const stickerItemElement = document.createElement('li');
-        stickerItemElement.className = 'se-sidebar-item';
-        stickerItemElement.innerHTML = `
-<button type="button" class="se-sidebar-element se-sidebar-element-sticker" draggable="false">
-  <img class="se-sidebar-sticker"/>
-</button>`;
-        stickerItemElement.querySelector('button img').src = stickerItem.image;
-        stickerItemElement.querySelector('button').addEventListener('click', function () {
-          const dataTransfer = new DataTransfer();
-          const pasteElement = document.querySelector('div[allow="clipboard-read"]');
-          dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
-          let event = new CustomEvent('paste', {
-            bubbles: true,
-          });
-          event.clipboardData = dataTransfer;
-          pasteElement.dispatchEvent(event);
-          // hide stickers
-          this.closest('div.se-popup-container').querySelector('button.se-popup-close-button').click();
-        });
-        stickerList.appendChild(stickerItemElement);
-      }
       stickerItems.appendChild(stickerList);
     }
 
