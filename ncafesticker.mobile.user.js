@@ -393,7 +393,7 @@ const commentInjection = {
         stickerBox.className = 'TownCommentStickerList custom_sticker';
         stickerBox.innerHTML = `
 <div class="sticker_bar">
-    <div class="sticker_scroller">
+    <div class="sticker_scroller" style="margin-right: 0px;">
         <ul class="sticker_set">
         </ul>
     </div>
@@ -409,23 +409,26 @@ const commentInjection = {
             const stickerElement = document.createElement('li');
             const stickerButton = document.createElement('button');
             const stickerImageElement = document.createElement('img');
-            stickerImageElement.src = sticker.info.thumbnail;
+            stickerImageElement.src = sticker.thumbnail;
             stickerImageElement.height = '24';
-            stickerImageElement.dataset['list'] = JSON.stringify(sticker.stickers);
-            stickerImageElement.addEventListener('click', function (e) {
+            stickerButton.dataset.id = sticker.id;
+            stickerButton.addEventListener('click', async function (e) {
                 const top = this.closest('.TownCommentStickerList');
                 if (!top.querySelector('.sticker_list')) {
                     const stickerList = document.createElement('div');
                     stickerList.className = 'sticker_list';
                 }
-                commentInjection.updateStickers(top.querySelector('.sticker_list'), JSON.parse(this.dataset['list']));
+                Array.from(this.closest('.sticker_set').querySelectorAll('button')).map(e => e.style['filter'] = 'grayscale(1)');
+                this.style['filter'] = 'grayscale(0)';
+                commentInjection.updateStickers(top.querySelector('.sticker_list'), await getSticker(parseInt(this.dataset.id, 10)));
             });
+            stickerButton.style['filter'] = 'grayscale(1)';
             stickerButton.appendChild(stickerImageElement);
             stickerElement.appendChild(stickerButton);
             stickerSetElement.appendChild(stickerElement);
         }
         if (stickers[0]) {
-            commentInjection.updateStickers(stickerBox.querySelector('.sticker_list'), stickers[0].stickers);
+            stickerSetElement.querySelector(':first-child > button').click();
         }
 
         // add custom sticker import button
