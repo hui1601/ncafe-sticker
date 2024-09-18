@@ -3,9 +3,12 @@
 // @match       *://cafe.naver.com/*
 // @grant       GM.getValue
 // @grant       GM.setValue
+// @grant       GM.deleteValue
 // @run-at      document-body
-// @version     1.8
+// @version     1.9
 // @author      웡웡이
+// @require     https://code.jquery.com/jquery-3.7.1.js
+// @require     https://code.jquery.com/ui/1.14.0/jquery-ui.js
 // ==/UserScript==
 
 const config = {};
@@ -16,7 +19,12 @@ function sleep(ms) {
 clearStickerList = async (callback) => {
   const reply = confirm(`모든 스티커를 삭제합니다. 계속하시겠습니까?`);
   if (reply) {
-    await await GM.setValue('sticker', []);
+    await GM.setValue('sticker', []);
+    let stickers = await GM.getValue('sticker_list', []);
+    for (let sticker of stickers) {
+      await GM.deleteValue(`sticker_${sticker.id}`);
+    }
+    await GM.setValue('sticker_list', []);
     console.info(`삭제 완료`);
     if (callback) {
       callback();
@@ -27,7 +35,11 @@ clearStickerList = async (callback) => {
 };
 
 async function getStickerList() {
-  return await GM.getValue('sticker', []);
+  return await GM.getValue('sticker_list', []);
+}
+
+async function getSticker(id) {
+  return await GM.getValue(`sticker_${id}`, []);
 }
 
 function detectMime(arr) {
@@ -61,6 +73,110 @@ function detectMime(arr) {
   }
   // failback for naver cafe
   return 'image/gif';
+}
+
+async function getSeoneInfo() {
+  if (!getSeoneInfo.cache) {
+    const response = await fetch(`https://apis.naver.com/cafe-web/cafe-editor-api/v2/cafes/${location.href.replace(/^.*cafes\//, '').match(/\d*/)[0]}/editor?experienceMode=true&from=pc`, {
+      method: 'GET',
+      mode: 'cors',
+      credentials: 'include',
+      headers: {
+        'X-Cafe-Product': 'pc',
+      },
+    });
+    getSeoneInfo.cache = (await response.json()).result;
+  }
+  return getSeoneInfo.cache;
+}
+
+function randomUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    let r = Math.random() * 16 | 0,
+      v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+async function getCachedImage(file) {
+  if (!file) {
+    return null;
+  }
+  if (file instanceof File) {
+    file = await file.arrayBuffer();
+  }
+  const operation = window.crypto.subtle || window.crypto.webkitSubtle;
+  const hash = await operation.digest('SHA-256', file);
+  const hashArray = Array.from(new Uint8Array(hash));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const cached = await GM.getValue(`image_${hashHex}`);
+  if (cached) {
+    return cached;
+  }
+  return null;
+}
+
+async function cacheImage(file, res) {
+  if (file instanceof File) {
+    file = await file.arrayBuffer();
+  }
+  const operation = window.crypto.subtle || window.crypto.webkitSubtle;
+  const hash = await operation.digest('SHA-256', file);
+  const hashArray = Array.from(new Uint8Array(hash));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  await GM.setValue(`image_${hashHex}`, res);
+  return hashHex;
+}
+
+async function uploadImage(file) {
+  // data url to blob
+  file = dataurlToFile(file, randomUUID() + '.gif');
+  const cached = await getCachedImage(file);
+  if (cached) {
+    return cached;
+  }
+  const seOneInfo = await getSeoneInfo();
+  const sessionKey = await (await fetch('https://platform.editor.naver.com/api/cafepc001/v1/photo-uploader/session-key', {
+    method: 'GET',
+    mode: 'cors',
+    credentials: 'include',
+    headers: {
+      'SE-App-Id': `SE-${randomUUID()}`,
+      'SE-Authorization': seOneInfo.token,
+    },
+  })).json();
+  if (!sessionKey.isSuccess) {
+    throw '세션 키를 가져오는데 실패했습니다';
+  }
+  const formData = new FormData();
+  formData.append('image', file);
+  const url = new URL(`https://cafe.upphoto.naver.com/${sessionKey.sessionKey}/simpleUpload/0`);
+  url.searchParams.append('userId', seOneInfo.userId);
+  url.searchParams.append('extractExif', 'true');
+  url.searchParams.append('extractAnimatedCnt', 'true');
+  url.searchParams.append('autorotate', 'true');
+  url.searchParams.append('extractDominantColor', 'false');
+  url.searchParams.append('denyAnimatedImage', 'false');
+  url.searchParams.append('skipXcamFiltering', 'true');
+  const response = await fetch(url, {
+    method: 'POST',
+    mode: 'cors',
+    credentials: 'include',
+    body: formData,
+  });
+  // parse xml
+  const data = await response.text();
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(data, 'text/xml');
+  const result = {
+    url: xml.querySelector('item > url').textContent,
+    width: parseInt(xml.querySelector('item > width').textContent, 10),
+    height: parseInt(xml.querySelector('item > height').textContent, 10),
+    fileSize: parseInt(xml.querySelector('item > fileSize').textContent, 10),
+    thumbnail: xml.querySelector('item > thumbnail').textContent,
+  }
+  await cacheImage(file, result);
+  return result;
 }
 
 function decodeBase64(data) {
@@ -188,29 +304,28 @@ async function addSticker(success) {
           }
           const stickers = await getStickerList();
 
-          const idConflict = stickers.filter(function (e) { return content.info.id == e.info.id; });
+          const idConflict = stickers.filter(function (e) { return content.id == e.id; });
           if (idConflict.length) {
-            if (!confirm(`${content.info.name}(${content.info.id})은(는) 이미 ${idConflict.map((e) => e.info.name + "(" + e.info.id + ")").join(', ')}(으)로 추가되어있습니다.\n덮어쓰겠습니까?`)) {
+            if (!confirm(`${content.name}(${content.id})은(는) 이미 ${idConflict.map((e) => e.name + "(" + e.id + ")").join(', ')}(으)로 추가되어있습니다.\n덮어쓰겠습니까?`)) {
               return;
             }
-            for (let i = 0; i < stickers.length; i++) {
-              if (stickers[i].info.id == content.info.id) {
-                stickers[i] = content;
-                break;
-              }
-            }
+            await GM.setValue(`sticker_${content.info.id}`, content.stickers);
           }
           else {
-            stickers.push(content);
+            stickers.push(content.info);
+            await GM.setValue('sticker_list', stickers);
+            await GM.setValue(`sticker_${content.info.id}`, content.stickers);
           }
-          await GM.setValue('sticker', stickers);
-          success();
+          await GM.setValue('sticker_list', stickers);
         } catch (e) {
           console.error(e);
           alert('올바른 형식이 아닙니다!');
         }
       }
     });
+    try {
+      success();
+    } catch (e) { }
   }
   input.click();
 }
@@ -279,12 +394,12 @@ const commentInjection = {
   },
   showSticker: async function (stickerButton) {
     let list = stickerButton.parentElement.querySelector('.se2_linesticker_list > ul');
-    if(list.childNodes.length) {
+    if (list.childNodes.length) {
       return;
     }
     list.innerHTML = '';
-    const stickers = (await getStickerList()).find(function (e) { return e.info.id == stickerButton.dataset['id']; });
-    for (let sticker of stickers.stickers) {
+    const stickers = await getSticker(stickerButton.dataset['id']);
+    for (let sticker of stickers) {
       let li = document.createElement('li');
       list.appendChild(li);
       li.style.background = 'unset';
@@ -311,7 +426,7 @@ const commentInjection = {
   showStickers: async function showStickers(stickerButton) {
     if (document.querySelector('._btn_shop')) {
       document.querySelector('.button_sticker').click();
-      while (document.querySelector('._btn_shop')) await sleep(10);
+      while (document.querySelector('._btn_shop')) await sleep(100);
     }
     const existingStickerLayer = document.querySelector('.custom_sticker_layer');
     if (existingStickerLayer) {
@@ -363,15 +478,17 @@ const commentInjection = {
       const stickerListUlElement = document.createElement('ul');
       stickerButton.type = 'button';
       stickerButton.innerHTML = `<img height="26px"/>`;
-      stickerButton.querySelector('img').src = sticker.info.thumbnail;
-      stickerButton.dataset['id'] = sticker.info.id;
+      stickerButton.querySelector('img').src = sticker.thumbnail;
+      stickerButton.dataset['id'] = sticker.id;
       stickerButton.addEventListener('click', function (e) {
         Array.from(this.parentElement.parentElement.childNodes).map(e => {
           if (e instanceof Element) {
             e.className = "";
+            e.style.filter = 'grayscale(1)';
           }
         });
         this.parentElement.className = 'active';
+        this.parentElement.style.filter = 'unset';
         commentInjection.showSticker(this);
       });
       stickerListElement.className = 'se2_linesticker_list';
@@ -472,7 +589,8 @@ function injectDownloadButton() {
 </svg><span style="line-height: 16px;vertical-align: middle;">다운로드하기</span>
 `;
     buttonElement.addEventListener('click', async function () {
-      this.querySelector('span').innerHTML = '다운로드 중…';
+      const downloadText = this.querySelector('span');
+      downloadText.innerText = '다운로드 중…';
       try {
         this.disabled = 'disabled';
         const metadata = JSON.parse(e.parentElement.querySelector('script[type="text/data"].__se_module_data').dataset['module']);
@@ -481,18 +599,47 @@ function injectDownloadButton() {
           mode: "cors",
           credentials: "include",
         })).json();
-        const videoData = URL.createObjectURL(await (await fetch(data.videos.list.pop().source)).blob());
-        const link = document.createElement("a");
-        link.href = videoData;
-        link.download = `${metadata.data.vid}.mp4`;
-        link.click();
-        this.disabled = null;
-        this.querySelector('span').innerHTML = '다운로드하기';
+        let downloadProgress = {
+          total: 0,
+          start: Date.now(),
+        };
+        fetch(data.videos.list.pop().source).then(async (res) => {
+          const reader = res.body.getReader();
+          const stream = new ReadableStream({
+            start(controller) {
+              function push() {
+                reader.read().then(({ done, value }) => {
+                  if (done) {
+                    controller.close();
+                    return;
+                  }
+                  controller.enqueue(value);
+                  push();
+                  downloadText.innerText = `다운로드 중… ${((downloadProgress.total += value.length) / 1000 / 1000).toFixed(2)}MB(${((downloadProgress.total / 1000 / 1000) / ((Date.now() - downloadProgress.start) / 1000)).toFixed(2)}MB/s)`;
+                });
+              }
+              push();
+            }
+          });
+          const readableStream = new Response(stream);
+          const videoData = URL.createObjectURL(await readableStream.blob());
+          const link = document.createElement("a");
+          link.href = videoData;
+          link.download = `${metadata.data.vid}.mp4`;
+          link.click();
+          this.disabled = null;
+          downloadText.innerText = '다운로드하기';
+        }).catch(e => {
+          const pre = document.createElement('pre');
+          console.error(e);
+          downloadText.innerText = '다운로드 실패!';
+          this.querySelector('span').appendChild(pre);
+        });
       } catch (e) {
         const pre = document.createElement('pre');
         pre.innerText = e.toString();
         console.error(e);
-        this.querySelector('span').innerHTML = '다운로드 실패!';
+        downloadText.innerText = '다운로드 실패!';
         this.querySelector('span').appendChild(pre);
       }
     });
@@ -510,8 +657,99 @@ const seOneInjection = {
   addSticker: async function () {
     addSticker(seOneInjection.hideSticker);
   },
-  resetSticker: async function () {
-    clearStickerList(seOneInjection.hideSticker);
+  removeSticker: async function () {
+    if (seOneInjection.editSticker.isMoving) {
+      return;
+    }
+    const button = this.querySelector('.se-tab-button');
+    const id = parseInt(button.dataset['id']);
+    const sticker = await getStickerList().then(e => e.find(e => e.id === id));
+    if (confirm(`${sticker.name}(${id})을(를) 정말 삭제하시겠습니까? 변경사항이 저장되지 않습니다.`)) {
+      if (isNaN(id)) {
+        return;
+      }
+      GM.getValue('sticker_list').then(async (stickerList) => {
+        const newStickerList = stickerList.filter(e => e.id !== id);
+        await GM.setValue('sticker_list', newStickerList);
+        await GM.deleteValue(`sticker_${id}`);
+        location.reload();
+      });
+    }
+  },
+  editSticker: async function () {
+    if (seOneInjection.editSticker.isEditing) {
+      try {
+        jQuery('.se-panel-tab-list').sortable('destroy');
+        seOneInjection.editSticker.isEditing = false;
+        document.querySelector('.se-panel-tab-list').childNodes.forEach(e => {
+          if (!(e instanceof Element)) {
+            return;
+          }
+          e.getAnimations().forEach(e => e.cancel());
+          e.removeEventListener('click', seOneInjection.removeSticker);
+        });
+        return;
+      } catch (e) { }
+    }
+    seOneInjection.editSticker.isEditing = true;
+    document.querySelector('.se-panel-tab-list').childNodes.forEach(e => {
+      if (!(e instanceof Element)) {
+        return;
+      }
+      let button = e.querySelector('.se-tab-button');
+      if (!button || !button.dataset['id']) {
+        return;
+      }
+      e.animate([
+        { transform: 'rotate(0deg)' },
+        { transform: 'rotate(-3deg)' },
+        { transform: 'rotate(0deg)' },
+        { transform: 'rotate(3deg)' },
+        { transform: 'rotate(0deg)' },
+      ], {
+        duration: 250,
+        iterations: Infinity,
+      });
+      e.addEventListener('click', seOneInjection.removeSticker);
+    });
+    jQuery('.se-panel-tab-list').sortable({
+      items: '.sortable.se-tab-item',
+      handle: '.se-tab-button',
+      cursor: 'move',
+      opacity: 0.5,
+      containment: 'parent',
+      cancel: '',
+    })
+      .on('sortstart', function () {
+        seOneInjection.editSticker.isMoving = true;
+      })
+      .on('sortstop', async function () {
+        const stickers = Array.from(document.querySelector('.se-panel-tab-list').childNodes).map(e => {
+          if (!(e instanceof Element)) {
+            return;
+          }
+          let button = e.querySelector('.se-tab-button');
+          if (!button) {
+            return;
+          }
+          const id = parseInt(button.dataset['id']);
+          if (isNaN(id)) {
+            return;
+          }
+          return id;
+        }).filter(e => e);
+        const stickerList = await getStickerList();
+        const newStickerList = [];
+        for (const id of stickers) {
+          const sticker = stickerList.find(e => e.id === id);
+          if (sticker) {
+            newStickerList.push(sticker);
+          }
+        }
+        await GM.setValue('sticker_list', newStickerList);
+        seOneInjection.editSticker.isMoving = false;
+        return true;
+      });
   },
   injectToolbar: async function (toolbar) {
     const customStickerTool = document.createElement('li');
@@ -540,8 +778,8 @@ const seOneInjection = {
     const computedStyle = window.getComputedStyle(itemsElement);
     const padding = parseInt(computedStyle.getPropertyValue('padding-left'), 10) + parseInt(computedStyle.getPropertyValue('padding-right'), 10);
     const displayWidth = itemsElement.clientWidth - padding;
-    const maxWidth = itemsElement.scrollWidth - padding;
-    const maxPage = Math.floor(maxWidth / displayWidth);
+    const maxElementInPage = Math.floor(displayWidth / 40);
+    const maxPage = Math.floor(itemsElement.childNodes.length / maxElementInPage);
     if (seOneInjection.config.page < 0) {
       seOneInjection.config.page = 0;
     }
@@ -569,9 +807,10 @@ const seOneInjection = {
     const padding = parseInt(computedStyle.getPropertyValue('padding-left'), 10) + parseInt(computedStyle.getPropertyValue('padding-right'), 10);
     const displayWidth = element.clientWidth - padding;
     const maxWidth = element.scrollWidth - padding;
+    const maxElementInPage = Math.floor(displayWidth / 40);
     seOneInjection.config.page++;
     seOneInjection.updatePageButton(this.parentElement);
-    let transform = displayWidth * seOneInjection.config.page;
+    let transform = 40 * maxElementInPage * seOneInjection.config.page;
     if (transform > maxWidth) {
       transform = transform - displayWidth;
     }
@@ -582,22 +821,25 @@ const seOneInjection = {
     const computedStyle = window.getComputedStyle(element);
     const padding = parseInt(computedStyle.getPropertyValue('padding-left'), 10) + parseInt(computedStyle.getPropertyValue('padding-right'), 10);
     const displayWidth = element.clientWidth - padding;
+    const maxElementInPage = Math.floor(displayWidth / 40);
     seOneInjection.config.page--;
     seOneInjection.updatePageButton(this.parentElement);
-    let transform = displayWidth * seOneInjection.config.page;
+    let transform = 40 * maxElementInPage * seOneInjection.config.page;
+    if (transform < 0) {
+      transform = 0;
+    }
     element.style.transform = `translateX(-${transform}px)`;
   },
   showSticker: async function (stickerButton) {
-    // Caution: ID value is just an index of sticker list in SeOne
     const stickerID = parseInt(stickerButton.dataset['id'], 10);
     let list = stickerButton.closest('.se-popup-content')
-      .querySelector(`.se-panel-content-sticker .se-sidebar-inner-scroll > ul:nth-child(${stickerID + 1})`);
+      .querySelector(`.se-panel-content-sticker .se-sidebar-inner-scroll > ul[data-id="${stickerID}"]`);
     if (list.childNodes.length) {
       return;
     }
     list.innerHTML = '';
-    const stickers = (await getStickerList())[stickerID];
-    for (let sticker of stickers.stickers) {
+    const stickers = await getSticker(stickerID);
+    for (let sticker of stickers) {
       let li = document.createElement('li');
       li.className = 'se-sidebar-item';
       li.innerHTML = `
@@ -606,14 +848,63 @@ const seOneInjection = {
 </button>`;
       li.querySelector('button img').src = sticker.image;
       li.querySelector('button').addEventListener('click', function () {
-        const dataTransfer = new DataTransfer();
-        const pasteElement = document.querySelector('div[allow="clipboard-read"]');
-        dataTransfer.items.add(dataurlToFile(this.querySelector('img').src, '웡.gif'));
-        let event = new CustomEvent('paste', {
-          bubbles: true,
+        uploadImage(this.querySelector('img').src).then(async (upload) => {
+          const pasteElement = document.querySelector('div[allow="clipboard-read"]');
+          // localstorage se3#SE_COPIED_DATA
+          let oWidth = upload.width;
+          let oHeight = upload.height;
+          let rsWidth = upload.width;
+          let rsHeight = upload.height;
+          const maxSide = 125;
+          if (oWidth > maxSide || oHeight > maxSide) {
+            if (oWidth > oHeight) {
+              rsWidth = maxSide;
+              rsHeight = Math.round((oHeight / oWidth) * maxSide);
+            }
+            else {
+              rsHeight = maxSide;
+              rsWidth = Math.round((oWidth / oHeight) * maxSide);
+            }
+          }
+          localStorage.setItem('se3#SE_COPIED_DATA', JSON.stringify({
+            docId: `TEMP-SE-${randomUUID()}`,
+            copyData: [
+              {
+                id: `SE-${randomUUID()}`,
+                ctype: 'image',
+                src: `https://cafeptthumb-phinf.pstatic.net/${upload.url}`,
+                width: rsWidth,
+                height: rsHeight,
+                origin: {
+                  ctype: 'imageOrigin',
+                  srcFrom: 'local',
+                },
+                originalWidth: oWidth,
+                originalHeight: oHeight,
+                fileSize: upload.fileSize,
+                domain: 'https://cafeptthumb-phinf.pstatic.net',
+                path: upload.url,
+                widthPercentage: 0,
+                represent: true,
+                caption: null,
+                fileName: `SE-${randomUUID()}.gif`,
+                format: 'normal',
+                imageLoaded: true,
+                internalResource: true,
+                layout: 'default',
+              },
+            ],
+          }));
+          const dataTransfer = new DataTransfer();
+          // add text/html to clipboard
+          dataTransfer.items.add(`<span data-input-buffer="INPUT_BUFFER_DATA;${encodeURIComponent(navigator.userAgent)};cafe.naver.com"></span>`, 'text/html');
+          dataTransfer.items.add('사진 설명을 입력하세요.', 'text/plain');
+          let event = new CustomEvent('paste', {
+            bubbles: true,
+          });
+          event.clipboardData = dataTransfer;
+          pasteElement.dispatchEvent(event);
         });
-        event.clipboardData = dataTransfer;
-        pasteElement.dispatchEvent(event);
         // hide stickers
         this.closest('div.se-popup-container').querySelector('button.se-popup-close-button').click();
       });
@@ -658,12 +949,13 @@ const seOneInjection = {
     const stickerIconItems = popup.querySelector('.se-panel-tab-list');
     const stickerItems = popup.querySelector('.se-sidebar-inner-scroll');
     const stickers = await getStickerList();
-    for (const [index, sticker] of stickers.entries()) {
+    for (let sticker of stickers) {
       const iconItem = document.createElement('li');
       const iconItemButton = document.createElement('button');
-      iconItem.className = 'se-tab-item';
+      iconItem.className = 'se-tab-item sortable';
       iconItemButton.className = 'se-tab-button';
-      iconItemButton.dataset.id = index;
+      iconItemButton.style['filter'] = 'grayscale(1)';
+      iconItemButton.dataset.id = sticker.id;
       iconItemButton.addEventListener('click', async function () {
         const activedSticker = this.closest('.se-panel-tab-list').querySelector('.se-is-selected');
         if (Array.from(this.classList).includes('se-is-selected')) {
@@ -671,18 +963,24 @@ const seOneInjection = {
         }
         if (activedSticker) {
           this.closest('.se-popup-content').querySelector('.se-popup-panel-content-sticker .se-is-on').classList.remove('se-is-on');
+          activedSticker.style['filter'] = 'grayscale(1)';
           activedSticker.classList.remove('se-is-selected');
         }
         this.classList.add('se-is-selected');
-        this.closest('.se-popup-content').querySelector(`.se-sidebar-inner-scroll ul:nth-child(${parseInt(this.dataset.id, 10) + 1})`).classList.add('se-is-on');
+        this.style['filter'] = 'grayscale(0)';
+        this.closest('.se-popup-content').querySelector('.se-panel-title').innerText = sticker.name;
+        this.closest('.se-popup-content').querySelector(`.se-sidebar-inner-scroll ul[data-id="${this.dataset.id}"]`).classList.add('se-is-on');
         seOneInjection.showSticker(this);
       });
-      iconItemButton.innerHTML = `<img height="37px"/>`;
-      iconItemButton.querySelector('img').src = sticker.info.thumbnail
+      iconItemButton.innerHTML = `<img/>`;
+      iconItemButton.querySelector('img').src = sticker.thumbnail
+      iconItemButton.querySelector('img').style.maxWidth = '37px';
+      iconItemButton.querySelector('img').style.maxHeight = '37px';
       iconItem.appendChild(iconItemButton);
       stickerIconItems.appendChild(iconItem);
       const stickerList = document.createElement('ul');
       stickerList.className = 'se-sidebar-list';
+      stickerList.dataset.id = sticker.id;
       stickerItems.appendChild(stickerList);
     }
 
@@ -690,23 +988,24 @@ const seOneInjection = {
     addStickerItem.className = 'se-tab-item';
     addStickerItem.innerHTML = `
 <button type="button" class="se-tab-button">
-  <svg xmlns="http://www.w3.org/2000/svg" width="37px" height="37px" viewBox="0 0 24 24" fill="none">
-    <path d="M20 14V7C20 5.34315 18.6569 4 17 4H12M20 14L13.5 20M20 14H15.5C14.3954 14 13.5 14.8954 13.5 16V20M13.5 20H7C5.34315 20 4 18.6569 4 17V12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M7 4V7M7 10V7M7 7H4M7 7H10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <svg xmlns="http://www.w3.org/2000/svg" width="30px" height="30px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+  <path d="M 22.666667,14.666668 V 5.3333337 c 0,-2.2091335 -1.7908,-4.0000004 -4.000001,-4.0000004 H 12 m 10.666667,13.3333347 -8.666667,8 m 8.666667,-8 H 16.666666 C 15.193866,14.666668 14,15.860535 14,17.333335 v 5.333333 m 0,0 H 5.3333333 c -2.2091334,0 -4,-1.7908 -4,-4 v -6.666667"/>
+  <path d="M7 4V7M7 10V7M7 7H4M7 7H10"/>
   </svg>
 </button>`;
     addStickerItem.querySelector('button').addEventListener('click', seOneInjection.addSticker);
     stickerIconItems.appendChild(addStickerItem);
-    const deleteStickerItem = document.createElement('li');
-    deleteStickerItem.className = 'se-tab-item';
-    deleteStickerItem.innerHTML = `
+    const editStickerItem = document.createElement('li');
+    editStickerItem.className = 'se-tab-item';
+    editStickerItem.innerHTML = `
 <button type="button" class="se-tab-button">
-  <svg xmlns="http://www.w3.org/2000/svg" width="37px" height="37px" viewBox="0 0 24 24" fill="none">
-    <path d="M3 3L21 21M18 6L17.6 12M17.2498 17.2527L17.1991 18.0129C17.129 19.065 17.0939 19.5911 16.8667 19.99C16.6666 20.3412 16.3648 20.6235 16.0011 20.7998C15.588 21 15.0607 21 14.0062 21H9.99377C8.93927 21 8.41202 21 7.99889 20.7998C7.63517 20.6235 7.33339 20.3412 7.13332 19.99C6.90607 19.5911 6.871 19.065 6.80086 18.0129L6 6H4M16 6L15.4559 4.36754C15.1837 3.55086 14.4194 3 13.5585 3H10.4416C9.94243 3 9.47576 3.18519 9.11865 3.5M11.6133 6H20M14 14V17M10 10V17" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <svg xmlns="http://www.w3.org/2000/svg" width="30px" height="30px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
   </svg>
 </button>`;
-    deleteStickerItem.querySelector('button').addEventListener('click', seOneInjection.resetSticker);
-    stickerIconItems.appendChild(deleteStickerItem);
+    editStickerItem.querySelector('button').addEventListener('click', seOneInjection.editSticker);
+    stickerIconItems.appendChild(editStickerItem);
     popup.querySelector('.se-popup-close-button').addEventListener('click', function () {
       const popup = this.closest('div.se-popup');
       const editorTop = this.closest('div.se-dnd-wrap');
@@ -717,10 +1016,12 @@ const seOneInjection = {
     stickerIconItems.querySelector('li:first-child button').click();
     editorTop.querySelector('.se-container').appendChild(popup);
     this.classList.add("se-is-selected");
+    seOneInjection.config.page = 0;
+    seOneInjection.updatePageButton(popup);
   },
 };
 // TODO: 네이밍 귀찮
-new MutationObserver((a, b) => {
+new MutationObserver(async (a, b) => {
   a.map(e => {
     if (e.addedNodes.length) {
       Array.from(e.addedNodes).map((e) => {
@@ -748,3 +1049,18 @@ if (wrap) {
   commentInjection.injectAttachBox(wrap.querySelector('.CommentWriter .attach_box'));
   injectDownloadButton();
 }
+
+// migrate old stickers
+(async () => {
+  let oldStickers = await GM.getValue('sticker', []);
+  if (!oldStickers || !oldStickers.length) {
+    return;
+  }
+  let newStickers = await getStickerList();
+  for (let sticker of oldStickers) {
+    newStickers.push(sticker.info);
+    await GM.setValue(`sticker_${sticker.info.id}`, sticker.stickers);
+  }
+  await GM.setValue('sticker', []);
+  await GM.setValue('sticker_list', newStickers);
+})();
